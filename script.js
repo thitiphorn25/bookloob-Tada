@@ -1,6 +1,6 @@
 // BookLoop — Supabase-powered marketplace. Configure SUPABASE_URL and SUPABASE_ANON_KEY below.
-const SUPABASE_URL = "https://pdicixyjupwvuqucifwp.supabase.co ";
-const SUPABASE_ANON_KEY = "sb_publishable_oQqmzZdNMlN-of44BSk9pg_e0oltk-I ";
+const SUPABASE_URL = "https://pdicixyjupwvuqucifwp.supabase.co".trim();
+const SUPABASE_ANON_KEY = "sb_publishable_oQqmzZdNMlN-of44BSk9pg_e0oltk-I".trim();
 const supabaseReady = SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("YOUR_") && SUPABASE_ANON_KEY.length > 30;
 const db = supabaseReady ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -30,7 +30,14 @@ async function init() {
   state.user = session?.user || null;
   await refreshListings();
   updateAccountButton();
-  db.auth.onAuthStateChange((_event, session)=>{ state.user=session?.user||null; updateAccountButton(); });
+  db.auth.onAuthStateChange((event, session)=>{
+  state.user = session?.user || null;
+  updateAccountButton();
+
+  if(event === "PASSWORD_RECOVERY"){
+    showModal("resetPasswordModal");
+  }
+});
 }
 
 function wireUI(){
@@ -47,6 +54,8 @@ function wireUI(){
   document.querySelectorAll(".modal-backdrop").forEach(bg=>bg.addEventListener("click",e=>{if(e.target===bg)hideModal(bg.id)}));
   document.querySelectorAll("[data-auth-tab]").forEach(b=>b.addEventListener("click",()=>setAuthMode(b.dataset.authTab)));
   $("authForm").addEventListener("submit",submitAuth);
+  $("resetPasswordForm").addEventListener("submit",submitNewPassword);
+  $("forgotPasswordLink").addEventListener("click",sendPasswordReset);
   $("listingForm").addEventListener("submit",saveListing);
   $("listingType").addEventListener("change",togglePrice);
   $("lookupBook").addEventListener("click",lookupBook);
@@ -78,21 +87,154 @@ function updateAccountButton(){
 function openAuth(mode){setAuthMode(mode);$("authMessage").textContent="";showModal("authModal")}
 function setAuthMode(mode){
   state.authMode=mode;
-  document.querySelectorAll("[data-auth-tab]").forEach(b=>b.classList.toggle("active",b.dataset.authTab===mode));
+
+  document.querySelectorAll("[data-auth-tab]").forEach(b=>
+    b.classList.toggle("active",b.dataset.authTab===mode)
+  );
+
   $("nameField").classList.toggle("hidden",mode!=="signup");
-  $("authTitle").innerHTML=mode==="login"?'Good to see <em>you.</em>':'Join the <em>loop.</em>';
-  $("authSubmit").textContent=mode==="login"?"เข้าสู่ระบบ":"สมัครสมาชิก";
+  $("confirmPasswordField").classList.toggle("hidden",mode!=="signup");
+  $("forgotPasswordLink").classList.toggle("hidden",mode!=="login");
+
+  $("authTitle").innerHTML=mode==="login"
+    ? 'Good to see <em>you.</em>'
+    : 'Join the <em>loop.</em>';
+
+  $("authSubmit").textContent=mode==="login"
+    ? "เข้าสู่ระบบ"
+    : "สมัครสมาชิก";
+
+  $("authPasswordConfirm").required=mode==="signup";
+  $("authPasswordConfirm").value="";
+  $("authMessage").textContent="";
 }
 async function submitAuth(e){
-  e.preventDefault();$("authMessage").textContent="กำลังดำเนินการ...";
-  const email=$("authEmail").value.trim(),password=$("authPassword").value;
+  e.preventDefault();
+
+  const email=$("authEmail").value.trim();
+  const password=$("authPassword").value;
+  const confirmPassword=$("authPasswordConfirm").value;
+  const message=$("authMessage");
+
+  if(password.length<6){
+    message.textContent="รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร";
+    return;
+  }
+
+  if(state.authMode==="signup" && password!==confirmPassword){
+    message.textContent="รหัสผ่านทั้งสองช่องไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง";
+    return;
+  }
+
+  message.textContent="กำลังดำเนินการ...";
+
   let result;
-  if(state.authMode==="signup") result=await db.auth.signUp({email,password,options:{data:{display_name:$("authName").value.trim()}}});
-  else result=await db.auth.signInWithPassword({email,password});
-  if(result.error){$("authMessage").textContent=result.error.message;return}
-  if(state.authMode==="signup"&&!result.data.session){$("authMessage").textContent="สมัครสมาชิกสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันบัญชี";return}
-  state.user=result.data.user;hideModal("authModal");updateAccountButton();toast("เข้าสู่ BookLoop แล้ว ♡");
+
+  try{
+    if(state.authMode==="signup"){
+      result=await db.auth.signUp({
+        email,
+        password,
+        options:{
+          data:{
+            display_name:$("authName").value.trim()
+          }
+        }
+      });
+    }else{
+      result=await db.auth.signInWithPassword({email,password});
+    }
+    
+
+    if(result.error){
+      message.textContent=result.error.message;
+      return;
+    }
+
+    if(state.authMode==="signup"&&!result.data.session){
+      message.textContent="สมัครสมาชิกสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันบัญชี";
+      return;
+    }
+
+    state.user=result.data.user;
+    hideModal("authModal");
+    updateAccountButton();
+    toast("เข้าสู่ BookLoop แล้ว ♡");
+
+  }catch(error){
+    message.textContent="เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
+    console.error(error);
+  }
 }
+
+async function sendPasswordReset(){
+  const email=$("authEmail").value.trim();
+  const message=$("authMessage");
+
+  if(!email){
+    message.textContent="กรุณากรอกอีเมลก่อนกดลืมรหัสผ่าน";
+    $("authEmail").focus();
+    return;
+  }
+
+  message.textContent="กำลังส่งลิงก์รีเซ็ตรหัสผ่าน...";
+
+  try{
+    const {error}=await db.auth.resetPasswordForEmail(email,{
+      redirectTo:window.location.origin+window.location.pathname
+    });
+
+    if(error){
+      message.textContent="ส่งลิงก์ไม่สำเร็จ: "+error.message;
+      return;
+    }
+
+    message.textContent="ส่งลิงก์รีเซ็ตรหัสผ่านไปยังอีเมลแล้ว กรุณาตรวจสอบกล่องจดหมาย 💗";
+
+  }catch(error){
+    message.textContent="เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง";
+    console.error(error);
+  }
+}
+
+async function submitNewPassword(e){
+  e.preventDefault();
+
+  const password = $("newPassword").value;
+  const confirm = $("confirmNewPassword").value;
+  const message = $("resetPasswordMessage");
+
+  if(password.length < 6){
+    message.textContent = "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร";
+    return;
+  }
+
+  if(password !== confirm){
+    message.textContent = "รหัสผ่านทั้งสองช่องไม่ตรงกัน";
+    return;
+  }
+
+  message.textContent = "กำลังบันทึกรหัสผ่าน...";
+
+  try{
+    const {error} = await db.auth.updateUser({password});
+
+    if(error){
+      message.textContent = "บันทึกไม่สำเร็จ: " + error.message;
+      return;
+    }
+
+    $("resetPasswordForm").reset();
+    hideModal("resetPasswordModal");
+    hideModal("authModal");
+    toast("เปลี่ยนรหัสผ่านสำเร็จแล้ว ♡");
+
+  }catch(error){
+    message.textContent = "เกิดข้อผิดพลาด กรุณาลองใหม่";
+    console.error(error);
+  }
+} 
+
 async function signOut(){await db.auth.signOut();state.user=null;updateAccountButton();toast("ออกจากระบบแล้ว");}
 function openListing(){
   if(!db)return;
