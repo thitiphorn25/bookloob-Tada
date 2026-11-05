@@ -86,15 +86,15 @@ function updateAccountButton(){
 }
 function openAuth(mode){setAuthMode(mode);$("authMessage").textContent="";showModal("authModal")}
 function setAuthMode(mode){
-  state.authMode=mode;
+  state.authMode = mode;
 
-  document.querySelectorAll("[data-auth-tab]").forEach(b=>
-    b.classList.toggle("active",b.dataset.authTab===mode)
-  );
+document.querySelectorAll("[data-auth-tab]").forEach(b =>
+  b.classList.toggle("active", b.dataset.authTab === mode)
+);
 
-  $("nameField").classList.toggle("hidden",mode!=="signup");
-  $("confirmPasswordField").classList.toggle("hidden",mode!=="signup");
-  $("forgotPasswordLink").classList.toggle("hidden",mode!=="login");
+$("nameField")?.classList.toggle("hidden", mode !== "signup");
+$("confirmPasswordField")?.classList.toggle("hidden", mode !== "signup");
+$("forgotPasswordLink")?.classList.toggle("hidden", mode !== "login");
 
   $("authTitle").innerHTML=mode==="login"
     ? 'Good to see <em>you.</em>'
